@@ -1,0 +1,12 @@
+diff --git a/gdk/win32/gdkevents-win32.c b/gdk/win32/gdkevents-win32.c
+index 1d6e0a4..22ebfe8 100644
+--- a/gdk/win32/gdkevents-win32.c
++++ b/gdk/win32/gdkevents-win32.c
+@@ -2740,6 +2740,7 @@ gdk_event_translate (MSG  *msg,
+ 
+        break;
+ 
++    case WM_INACTIVE:
+     case WM_KILLFOCUS:
+       if (_gdk_display->keyboard_grab.window != NULL &&
+ 	  !GDK_WINDOW_DESTROYED (_gdk_display->keyboard_grab.window))

@@ -1,0 +1,113 @@
+From 1c9c247dd1c112b3fa68725ba2f2e28412ca02d8 Mon Sep 17 00:00:00 2001
+From: Aleksander Morgado <aleksander@lanedo.com>
+Date: Fri, 15 Mar 2013 10:56:27 +0100
+Subject: [PATCH] win32: always recreate the cairo surface if requested to do
+ so
+
+When _gdk_windowing_create_cairo_surface() gets called, we should always create
+a fully new cairo surface, instead of just referencing the available one, which
+may already be finished (i.e. in CAIRO_STATUS_SURFACE_FINISHED state).
+
+A new user_data key is added to the surface to explicitly release the acquired
+DC when the surface is destroyed, independent to the user_data key added to
+clear the impl->user_data pointer.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=695636
+---
+ gdk/win32/gdkdrawable-win32.c | 44 ++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 33 insertions(+), 11 deletions(-)
+
+diff --git a/gdk/win32/gdkdrawable-win32.c b/gdk/win32/gdkdrawable-win32.c
+index b8a30b0..523146e 100644
+--- a/gdk/win32/gdkdrawable-win32.c
++++ b/gdk/win32/gdkdrawable-win32.c
+@@ -144,6 +144,7 @@ static GdkVisual*   gdk_win32_get_visual     (GdkDrawable    *drawable);
+ static void gdk_drawable_impl_win32_finalize   (GObject *object);
+ 
+ static const cairo_user_data_key_t gdk_win32_cairo_key;
++static const cairo_user_data_key_t gdk_win32_cairo_hdc_key;
+ 
+ G_DEFINE_TYPE (GdkDrawableImplWin32,  _gdk_drawable_impl_win32, GDK_TYPE_DRAWABLE)
+ 
+@@ -1919,13 +1920,33 @@ _gdk_win32_drawable_release_dc (GdkDrawable *drawable)
+     }
+ }
+ 
++static void
++gdk_win32_cairo_surface_release_hdc (void *data)
++{
++  _gdk_win32_drawable_release_dc (GDK_DRAWABLE (data));
++}
++
+ cairo_surface_t *
+ _gdk_windowing_create_cairo_surface (GdkDrawable *drawable,
+ 				     gint width,
+ 				     gint height)
+ {
+-  /* width and height are determined from the DC */
+-  return gdk_win32_ref_cairo_surface (drawable);
++  cairo_surface_t *surface;
++  HDC hdc;
++
++  hdc = _gdk_win32_drawable_acquire_dc (drawable);
++  if (!hdc)
++    return NULL;
++
++  surface = cairo_win32_surface_create (hdc);
++
++  /* Whenever the cairo surface is destroyed, we need to release the
++   * HDC that was acquired */
++  cairo_surface_set_user_data (surface, &gdk_win32_cairo_hdc_key,
++			       drawable,
++			       gdk_win32_cairo_surface_release_hdc);
++
++  return surface;
+ }
+ 
+ static void
+@@ -1933,7 +1954,6 @@ gdk_win32_cairo_surface_destroy (void *data)
+ {
+   GdkDrawableImplWin32 *impl = data;
+ 
+-  _gdk_win32_drawable_release_dc (GDK_DRAWABLE (impl));
+   impl->cairo_surface = NULL;
+ }
+ 
+@@ -1948,14 +1968,14 @@ gdk_win32_ref_cairo_surface (GdkDrawable *drawable)
+ 
+   if (!impl->cairo_surface)
+     {
+-      HDC hdc = _gdk_win32_drawable_acquire_dc (drawable);
+-      if (!hdc)
+-	return NULL;
+-
+-      impl->cairo_surface = cairo_win32_surface_create (hdc);
++      /* width and height are determined from the DC */
++      impl->cairo_surface = _gdk_windowing_create_cairo_surface (drawable, 0, 0);
+ 
++      /* Whenever the cairo surface is destroyed, we need to clear the
++       * pointer that we had stored here */
+       cairo_surface_set_user_data (impl->cairo_surface, &gdk_win32_cairo_key,
+-				   drawable, gdk_win32_cairo_surface_destroy);
++				   drawable,
++				   gdk_win32_cairo_surface_destroy);
+     }
+   else
+     cairo_surface_reference (impl->cairo_surface);
+@@ -2034,9 +2054,11 @@ _gdk_win32_drawable_finish (GdkDrawable *drawable)
+   if (impl->cairo_surface)
+     {
+       cairo_surface_finish (impl->cairo_surface);
++      cairo_surface_set_user_data (impl->cairo_surface, &gdk_win32_cairo_hdc_key, NULL, NULL);
+       cairo_surface_set_user_data (impl->cairo_surface, &gdk_win32_cairo_key, NULL, NULL);
+     }
+ 
+-  g_assert (impl->hdc_count == 0);
++  /* impl->hdc_count doesn't have to be 0 here; as there may still be surfaces
++   * created with gdk_windowing_create_cairo_surface() out there, which are not
++   * managed internally by the drawable */
+ }
+-
+-- 
+1.8.1.4
+

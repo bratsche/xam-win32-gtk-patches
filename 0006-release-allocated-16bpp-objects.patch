@@ -1,0 +1,38 @@
+diff --git a/gdk/win32/gdkpixmap-win32.c b/gdk/win32/gdkpixmap-win32.c
+index e06d069..f40d606 100644
+--- a/gdk/win32/gdkpixmap-win32.c
++++ b/gdk/win32/gdkpixmap-win32.c
+@@ -125,6 +125,12 @@ gdk_pixmap_impl_win32_finalize (GObject *object)
+ 	  /* Drop our reference */
+ 	  cairo_surface_destroy (drawable_impl->cairo_surface);
+ 	  drawable_impl->cairo_surface = NULL;
++
++          if (impl->is_allocated)
++            {
++              GDI_CALL (DeleteDC, (drawable_impl->hdc));
++              DeleteObject (GDK_PIXMAP_HBITMAP (wrapper));
++            }
+ 	}
+     }
+ 
+@@ -269,6 +275,8 @@ _gdk_pixmap_new (GdkDrawable *drawable,
+       HWND hwnd;
+       GdkVisual *visual;
+ 
++      pixmap_impl->is_allocated = TRUE;
++
+       if (GDK_IS_WINDOW (drawable))
+ 	hwnd = GDK_WINDOW_HWND (drawable);
+       else
+diff --git a/gdk/win32/gdkpixmap-win32.h b/gdk/win32/gdkpixmap-win32.h
+index fbeb28f..e9d965d 100644
+--- a/gdk/win32/gdkpixmap-win32.h
++++ b/gdk/win32/gdkpixmap-win32.h
+@@ -53,6 +53,7 @@ struct _GdkPixmapImplWin32
+   gint height;
+   guchar *bits;
+   guint is_foreign : 1;
++  guint is_allocated : 1;
+ };
+  
+ struct _GdkPixmapImplWin32Class 
